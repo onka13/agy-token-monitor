@@ -86,6 +86,7 @@ class SessionSummary:
     transcript_path: str
     alias: str = ""
     first_prompt: str = ""
+    last_prompt: str = ""
     first_seen_at: str = ""
     last_seen_at: str = ""
     last_model: str = ""
@@ -135,6 +136,7 @@ class TokenHistoryStore:
                 transcript_path TEXT NOT NULL,
                 alias TEXT NOT NULL DEFAULT '',
                 first_prompt TEXT NOT NULL DEFAULT '',
+                last_prompt TEXT NOT NULL DEFAULT '',
                 first_seen_at TEXT NOT NULL DEFAULT '',
                 last_seen_at TEXT NOT NULL DEFAULT '',
                 last_model TEXT NOT NULL DEFAULT '',
@@ -189,6 +191,25 @@ class TokenHistoryStore:
             );
             """
         )
+        cols = {r["name"] for r in cur.execute("PRAGMA table_info(sessions)").fetchall()}
+        if "last_prompt" not in cols:
+            cur.execute("ALTER TABLE sessions ADD COLUMN last_prompt TEXT NOT NULL DEFAULT ''")
+            cur.execute(
+                """
+                UPDATE sessions
+                SET last_prompt = COALESCE(
+                    (
+                        SELECT t.prompt_preview
+                        FROM turns t
+                        WHERE t.conversation_id = sessions.conversation_id
+                          AND t.prompt_preview != ''
+                        ORDER BY t.turn_index DESC
+                        LIMIT 1
+                    ),
+                    first_prompt
+                )
+                """
+            )
         self._conn.commit()
 
     def close(self) -> None:
@@ -330,6 +351,7 @@ class TokenHistoryStore:
 
         turns_list = [turns_map[k] for k in sorted(turns_map.keys())]
         first_prompt = next((t.prompt_preview for t in turns_list if t.prompt_preview), "")
+        last_prompt = next((t.prompt_preview for t in reversed(turns_list) if t.prompt_preview), "")
         first_seen = steps[0].created_at if steps else ""
         last_seen = steps[-1].created_at if steps else ""
         last_model = next((s.model for s in reversed(steps) if s.model), "")
@@ -352,15 +374,16 @@ class TokenHistoryStore:
             self._conn.execute(
                 """
                 INSERT INTO sessions (
-                    conversation_id, transcript_path, alias, first_prompt,
+                    conversation_id, transcript_path, alias, first_prompt, last_prompt,
                     first_seen_at, last_seen_at, last_model,
                     total_turns, total_steps, total_tool_calls, total_errors,
                     total_input_tokens, total_cache_read_tokens, total_output_tokens,
                     total_tokens, file_mtime, file_size
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(conversation_id) DO UPDATE SET
                     transcript_path=excluded.transcript_path,
                     first_prompt=excluded.first_prompt,
+                    last_prompt=excluded.last_prompt,
                     first_seen_at=excluded.first_seen_at,
                     last_seen_at=excluded.last_seen_at,
                     last_model=excluded.last_model,
@@ -380,6 +403,7 @@ class TokenHistoryStore:
                     str(path),
                     alias,
                     first_prompt,
+                    last_prompt,
                     first_seen,
                     last_seen,
                     last_model,
@@ -498,6 +522,7 @@ class TokenHistoryStore:
                 transcript_path=r["transcript_path"],
                 alias=r["alias"],
                 first_prompt=r["first_prompt"],
+                last_prompt=r["last_prompt"],
                 first_seen_at=r["first_seen_at"],
                 last_seen_at=r["last_seen_at"],
                 last_model=r["last_model"],
@@ -552,6 +577,7 @@ class TokenHistoryStore:
             transcript_path=r["transcript_path"],
             alias=r["alias"],
             first_prompt=r["first_prompt"],
+            last_prompt=r["last_prompt"],
             first_seen_at=r["first_seen_at"],
             last_seen_at=r["last_seen_at"],
             last_model=r["last_model"],

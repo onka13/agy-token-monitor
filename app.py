@@ -223,7 +223,7 @@ class HistoryWindow(tk.Toplevel):
         self.sess_tree = ttk.Treeview(sess_frame, columns=sess_cols, show="headings")
         s_headers = {
             "id": ("Conv ID", 95, "w"),
-            "name": ("Ad / İlk İstek", 220, "w"),
+            "name": ("Ad / Son İstek", 220, "w"),
             "last_seen": ("Son Aktivite", 80, "center"),
             "model": ("Son Model", 140, "w"),
             "turns": ("Tur", 45, "e"),
@@ -311,7 +311,7 @@ class HistoryWindow(tk.Toplevel):
             self.sess_tree.delete(item)
 
         for s in self.store.list_sessions():
-            label = s.alias or s.first_prompt or "(İsimsiz)"
+            label = s.alias or s.last_prompt or s.first_prompt or "(İsimsiz)"
             self.sess_tree.insert(
                 "",
                 "end",
@@ -713,8 +713,8 @@ class TokenMonitorApp(tk.Tk):
 
         labels = []
         for s in self._sessions_cache:
-            name = s.alias or s.first_prompt or "İsimsiz"
-            labels.append(f"{s.conversation_id[:8]} · {name[:24]}")
+            name = (s.alias or s.last_prompt or s.first_prompt or "İsimsiz")[:20]
+            labels.append(f"{name} · {s.conversation_id[:8]}")
         self.session_combo["values"] = labels
 
         if self.auto_follow.get() and self._sessions_cache:
