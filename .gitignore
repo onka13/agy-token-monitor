@@ -1,0 +1,16 @@
+# Local SQLite database and exported history
+data/
+*.db
+*.db-wal
+*.db-shm
+*.csv
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# macOS
+.DS_Store
