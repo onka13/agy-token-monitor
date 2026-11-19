@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import tkinter as tk
 from datetime import datetime
 from pathlib import Path
@@ -11,6 +12,7 @@ from tracker import SessionSummary, TokenHistoryStore, TurnSummary
 
 
 POLL_INTERVAL_MS = 2000
+STATE_PATH = Path(__file__).resolve().parent / "data" / "window_state.json"
 
 BG = "#14161b"
 BG_CARD = "#1d2028"
@@ -45,6 +47,43 @@ def fmt_time(iso_ts: str) -> str:
         return dt.strftime("%H:%M:%S")
     except ValueError:
         return iso_ts[:19]
+
+
+class DarkButton(tk.Label):
+    """macOS-safe dark flat button (avoids Aqua white native button background)."""
+
+    def __init__(
+        self,
+        parent: tk.Widget,
+        text: str,
+        command: object,
+        bg: str = BG_HOVER,
+        hover_bg: str = "#333846",
+        fg: str = FG,
+        padx: int = 8,
+        pady: int = 3,
+        font: tuple[object, ...] = ("SF Pro Text", 10),
+    ) -> None:
+        super().__init__(
+            parent,
+            text=text,
+            bg=bg,
+            fg=fg,
+            padx=padx,
+            pady=pady,
+            font=font,
+            cursor="pointinghand",
+        )
+        self._bg = bg
+        self._hover_bg = hover_bg
+        self._command = command
+        self.bind("<Enter>", lambda _e: self.configure(bg=self._hover_bg))
+        self.bind("<Leave>", lambda _e: self.configure(bg=self._bg))
+        self.bind("<Button-1>", self._on_click)
+
+    def _on_click(self, _event: tk.Event) -> None:
+        if callable(self._command):
+            self._command()
 
 
 class HistoryWindow(tk.Toplevel):
@@ -97,26 +136,26 @@ class HistoryWindow(tk.Toplevel):
         )
         self.global_lbl.pack(side="left", fill="x", expand=True)
 
-        tk.Button(
+        DarkButton(
             top,
             text="CSV Dışa Aktar",
             command=self._export_csv,
             bg=BG_HOVER,
             fg=FG,
-            relief="flat",
             padx=10,
             pady=4,
+            font=("SF Pro Text", 11),
         ).pack(side="right", padx=(6, 0))
 
-        tk.Button(
+        DarkButton(
             top,
             text="Yenile",
             command=self.refresh,
             bg=BG_HOVER,
             fg=FG,
-            relief="flat",
             padx=10,
             pady=4,
+            font=("SF Pro Text", 11),
         ).pack(side="right")
 
         nb = ttk.Notebook(self)
@@ -311,11 +350,74 @@ class TokenMonitorApp(tk.Tk):
         self.configure(bg=BG)
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.94)
-        self.resizable(False, False)
+        self.resizable(True, True)
+        self.minsize(300, 175)
+        self._save_job: str | None = None
 
+        self._configure_dark_ttk()
         self._build_ui()
-        self._place_bottom_right()
+        self._restore_or_place_geometry()
+        self.bind("<Configure>", self._on_configure)
         self._poll()
+
+    def _configure_dark_ttk(self) -> None:
+        style = ttk.Style(self)
+        style.theme_use("clam")
+        style.configure(
+            "Dark.TCombobox",
+            fieldbackground=BG_CARD,
+            background=BG_HOVER,
+            foreground=FG,
+            arrowcolor=FG,
+            bordercolor=BORDER,
+            lightcolor=BORDER,
+            darkcolor=BORDER,
+            selectbackground=BG_HOVER,
+            selectforeground=FG,
+            padding=4,
+        )
+        style.map(
+            "Dark.TCombobox",
+            fieldbackground=[("readonly", BG_CARD), ("disabled", BG_CARD)],
+            foreground=[("readonly", FG), ("disabled", FG_MUTED)],
+            background=[("readonly", BG_HOVER), ("active", "#333846")],
+            selectbackground=[("readonly", BG_CARD)],
+            selectforeground=[("readonly", FG)],
+        )
+        self.option_add("*TCombobox*Listbox.background", BG_CARD)
+        self.option_add("*TCombobox*Listbox.foreground", FG)
+        self.option_add("*TCombobox*Listbox.selectBackground", "#2e4066")
+        self.option_add("*TCombobox*Listbox.selectForeground", FG)
+
+    def _restore_or_place_geometry(self) -> None:
+        if STATE_PATH.exists():
+            try:
+                data = json.loads(STATE_PATH.read_text(encoding="utf-8"))
+                geom = data.get("geometry")
+                if isinstance(geom, str) and "x" in geom and "+" in geom:
+                    self.geometry(geom)
+                    self.update_idletasks()
+                    return
+            except (OSError, json.JSONDecodeError):
+                pass
+        self._place_bottom_right()
+
+    def _save_geometry(self) -> None:
+        try:
+            STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            STATE_PATH.write_text(
+                json.dumps({"geometry": self.geometry()}, indent=2),
+                encoding="utf-8",
+            )
+        except OSError:
+            pass
+
+    def _on_configure(self, event: tk.Event) -> None:
+        if event.widget is not self:
+            return
+        if self._save_job is not None:
+            self.after_cancel(self._save_job)
+        self._save_job = self.after(400, self._save_geometry)
 
     def _place_bottom_right(self) -> None:
         self.update_idletasks()
@@ -345,28 +447,26 @@ class TokenMonitorApp(tk.Tk):
         title_lbl.bind("<ButtonPress-1>", self._start_drag)
         title_lbl.bind("<B1-Motion>", self._on_drag)
 
-        self.pin_btn = tk.Button(
+        self.pin_btn = DarkButton(
             header,
             text="📌",
             command=self._toggle_topmost,
             bg=BG_HOVER,
             fg=GREEN,
-            relief="flat",
-            padx=4,
-            pady=0,
+            padx=5,
+            pady=1,
             font=("SF Pro Text", 11),
         )
         self.pin_btn.pack(side="right")
 
-        self.compact_btn = tk.Button(
+        self.compact_btn = DarkButton(
             header,
             text="▾",
             command=self._toggle_compact,
             bg=BG_HOVER,
             fg=FG_MUTED,
-            relief="flat",
-            padx=4,
-            pady=0,
+            padx=6,
+            pady=1,
             font=("SF Pro Text", 11),
         )
         self.compact_btn.pack(side="right")
@@ -380,21 +480,22 @@ class TokenMonitorApp(tk.Tk):
             sess_row,
             textvariable=self.session_var,
             state="readonly",
+            style="Dark.TCombobox",
             width=24,
             font=("SF Mono", 10),
         )
         self.session_combo.pack(side="left", fill="x", expand=True)
         self.session_combo.bind("<<ComboboxSelected>>", self._on_combo_select)
 
-        tk.Button(
+        DarkButton(
             sess_row,
             text="✎",
             command=self._rename_session,
             bg=BG_CARD,
             fg=FG,
-            relief="flat",
-            padx=5,
-            pady=1,
+            padx=6,
+            pady=2,
+            font=("SF Pro Text", 11),
         ).pack(side="left", padx=(4, 0))
 
         self.auto_btn = tk.Checkbutton(
@@ -496,25 +597,23 @@ class TokenMonitorApp(tk.Tk):
         footer = tk.Frame(self.body, bg=BG, pady=4)
         footer.pack(fill="x")
 
-        tk.Button(
+        DarkButton(
             footer,
             text="ID Gir",
             command=self._prompt_conv_id,
             bg=BG_CARD,
             fg=FG,
-            relief="flat",
             padx=8,
             pady=3,
             font=("SF Pro Text", 10),
         ).pack(side="left")
 
-        tk.Button(
+        DarkButton(
             footer,
             text="Geçmiş & Tüm İstatistikler",
             command=self._open_history,
             bg=BG_HOVER,
             fg=ACCENT,
-            relief="flat",
             padx=8,
             pady=3,
             font=("SF Pro Text", 10, "bold"),
@@ -545,7 +644,8 @@ class TokenMonitorApp(tk.Tk):
             self.sess_card.pack(fill="x", pady=(0, 6), after=self.turn_card)
             self.compact_btn.configure(text="▾")
         self.update_idletasks()
-        self.geometry(f"340x{self.winfo_reqheight()}")
+        cur_w = max(300, self.winfo_width())
+        self.geometry(f"{cur_w}x{self.winfo_reqheight()}")
 
     def _on_combo_select(self, _event: tk.Event) -> None:
         idx = self.session_combo.current()
@@ -679,6 +779,7 @@ class TokenMonitorApp(tk.Tk):
         )
 
     def destroy(self) -> None:
+        self._save_geometry()
         self.store.close()
         super().destroy()
 
