@@ -28,7 +28,7 @@ BORDER = "#2c313d"
 
 
 def fmt_num(n: int) -> str:
-    return f"{n:,}".replace(",", ".")
+    return f"{n:,}"
 
 
 def fmt_short(n: int) -> str:
@@ -93,8 +93,8 @@ class HistoryWindow(tk.Toplevel):
         super().__init__(parent)
         self.app = parent
         self.store = store
-        self.title("Antigravity Token Geçmişi & İstatistikler")
-        self.geometry("980x560")
+        self.title("Antigravity Token History & Statistics")
+        self.geometry("1040x560")
         self.configure(bg=BG)
 
         self._build_ui()
@@ -138,7 +138,7 @@ class HistoryWindow(tk.Toplevel):
 
         DarkButton(
             top,
-            text="CSV Dışa Aktar",
+            text="Export CSV",
             command=self._export_csv,
             bg=BG_HOVER,
             fg=FG,
@@ -149,7 +149,7 @@ class HistoryWindow(tk.Toplevel):
 
         DarkButton(
             top,
-            text="Yenile",
+            text="Refresh",
             command=self.refresh,
             bg=BG_HOVER,
             fg=FG,
@@ -163,7 +163,7 @@ class HistoryWindow(tk.Toplevel):
 
         # Tab 1: Turns of selected session
         turns_frame = tk.Frame(nb, bg=BG)
-        nb.add(turns_frame, text="Seçili Oturum Turları")
+        nb.add(turns_frame, text="Selected Session Turns")
 
         turn_cols = (
             "turn",
@@ -181,18 +181,18 @@ class HistoryWindow(tk.Toplevel):
         )
         self.turns_tree = ttk.Treeview(turns_frame, columns=turn_cols, show="headings")
         headers = {
-            "turn": ("Tur", 45, "center"),
-            "time": ("Saat", 72, "center"),
-            "duration": ("Süre", 58, "e"),
+            "turn": ("Turn", 45, "center"),
+            "time": ("Time", 72, "center"),
+            "duration": ("Duration", 64, "e"),
             "model": ("Model", 145, "w"),
-            "steps": ("Adım", 48, "e"),
-            "tools": ("Tool", 48, "e"),
-            "errors": ("Hata", 45, "e"),
+            "steps": ("Steps", 48, "e"),
+            "tools": ("Tools", 48, "e"),
+            "errors": ("Errors", 50, "e"),
             "input": ("Input", 80, "e"),
             "cache": ("Cache", 85, "e"),
             "output": ("Output", 75, "e"),
-            "total": ("Toplam", 90, "e"),
-            "prompt": ("İstek Özeti", 240, "w"),
+            "total": ("Total", 90, "e"),
+            "prompt": ("Prompt Summary", 240, "w"),
         }
         for col, (title, width, anchor) in headers.items():
             self.turns_tree.heading(col, text=title)
@@ -205,10 +205,11 @@ class HistoryWindow(tk.Toplevel):
 
         # Tab 2: All sessions
         sess_frame = tk.Frame(nb, bg=BG)
-        nb.add(sess_frame, text="Tüm Oturumlar")
+        nb.add(sess_frame, text="All Sessions")
 
         sess_cols = (
             "id",
+            "project",
             "name",
             "last_seen",
             "model",
@@ -222,17 +223,18 @@ class HistoryWindow(tk.Toplevel):
         )
         self.sess_tree = ttk.Treeview(sess_frame, columns=sess_cols, show="headings")
         s_headers = {
-            "id": ("Conv ID", 95, "w"),
-            "name": ("Ad / Son İstek", 220, "w"),
-            "last_seen": ("Son Aktivite", 80, "center"),
-            "model": ("Son Model", 140, "w"),
-            "turns": ("Tur", 45, "e"),
-            "steps": ("Adım", 50, "e"),
-            "tools": ("Tool", 50, "e"),
+            "id": ("Conv ID", 90, "w"),
+            "project": ("Project", 130, "w"),
+            "name": ("Name / Last Prompt", 220, "w"),
+            "last_seen": ("Last Active", 85, "center"),
+            "model": ("Last Model", 140, "w"),
+            "turns": ("Turns", 48, "e"),
+            "steps": ("Steps", 50, "e"),
+            "tools": ("Tools", 50, "e"),
             "input": ("Input", 80, "e"),
             "cache": ("Cache", 85, "e"),
             "output": ("Output", 75, "e"),
-            "total": ("Toplam", 95, "e"),
+            "total": ("Total", 95, "e"),
         }
         for col, (title, width, anchor) in s_headers.items():
             self.sess_tree.heading(col, text=title)
@@ -264,18 +266,18 @@ class HistoryWindow(tk.Toplevel):
         if not out:
             return
         count = self.store.export_turns_csv(Path(out))
-        messagebox.showinfo("Dışa Aktarıldı", f"{count} tur kaydı aktarıldı:\n{out}", parent=self)
+        messagebox.showinfo("Exported", f"Exported {count} turn records:\n{out}", parent=self)
 
     def refresh(self) -> None:
         totals = self.store.get_global_totals()
         self.global_lbl.configure(
             text=(
-                f"Tüm Oturumlar: {totals.get('session_count', 0)}  |  "
-                f"Tur: {fmt_num(totals.get('turns', 0))}  |  "
+                f"All Sessions: {totals.get('session_count', 0)}  |  "
+                f"Turns: {fmt_num(totals.get('turns', 0))}  |  "
                 f"In: {fmt_short(totals.get('input_tokens', 0))}  "
                 f"Cache: {fmt_short(totals.get('cache_read_tokens', 0))}  "
                 f"Out: {fmt_short(totals.get('output_tokens', 0))}  |  "
-                f"Toplam: {fmt_num(totals.get('total_tokens', 0))}"
+                f"Total: {fmt_num(totals.get('total_tokens', 0))}"
             )
         )
 
@@ -311,13 +313,14 @@ class HistoryWindow(tk.Toplevel):
             self.sess_tree.delete(item)
 
         for s in self.store.list_sessions():
-            label = s.alias or s.last_prompt or s.first_prompt or "(İsimsiz)"
+            label = s.alias or s.last_prompt or s.first_prompt or "(Untitled)"
             self.sess_tree.insert(
                 "",
                 "end",
                 tags=(s.conversation_id,),
                 values=(
                     s.conversation_id[:8],
+                    s.project_name or "-",
                     label,
                     fmt_time(s.last_seen_at),
                     s.last_model or "-",
@@ -351,7 +354,7 @@ class TokenMonitorApp(tk.Tk):
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.94)
         self.resizable(True, True)
-        self.minsize(300, 175)
+        self.minsize(340, 175)
         self._save_job: str | None = None
 
         self._configure_dark_ttk()
@@ -421,7 +424,7 @@ class TokenMonitorApp(tk.Tk):
 
     def _place_bottom_right(self) -> None:
         self.update_idletasks()
-        w = 340
+        w = 440
         h = self.winfo_reqheight() or 290
         sw = self.winfo_screenwidth()
         sh = self.winfo_screenheight()
@@ -481,7 +484,7 @@ class TokenMonitorApp(tk.Tk):
             textvariable=self.session_var,
             state="readonly",
             style="Dark.TCombobox",
-            width=24,
+            width=36,
             font=("SF Mono", 10),
         )
         self.session_combo.pack(side="left", fill="x", expand=True)
@@ -500,7 +503,7 @@ class TokenMonitorApp(tk.Tk):
 
         self.auto_btn = tk.Checkbutton(
             sess_row,
-            text="Oto",
+            text="Auto",
             variable=self.auto_follow,
             bg=BG,
             fg=FG_MUTED,
@@ -517,7 +520,7 @@ class TokenMonitorApp(tk.Tk):
 
         self.meta_lbl = tk.Label(
             self.body,
-            text="Oturum bekleniyor...",
+            text="Waiting for session...",
             bg=BG,
             fg=FG_MUTED,
             font=("SF Mono", 10),
@@ -531,7 +534,7 @@ class TokenMonitorApp(tk.Tk):
 
         self.turn_title = tk.Label(
             self.turn_card,
-            text="SON TUR",
+            text="LAST TURN",
             bg=BG_CARD,
             fg=AMBER,
             font=("SF Pro Text", 10, "bold"),
@@ -551,7 +554,7 @@ class TokenMonitorApp(tk.Tk):
 
         self.turn_sub = tk.Label(
             self.turn_card,
-            text="Toplam: -",
+            text="Total: -",
             bg=BG_CARD,
             fg=FG_MUTED,
             font=("SF Mono", 10),
@@ -565,7 +568,7 @@ class TokenMonitorApp(tk.Tk):
 
         self.sess_title = tk.Label(
             self.sess_card,
-            text="OTURUM TOPLAMI",
+            text="SESSION TOTAL",
             bg=BG_CARD,
             fg=PURPLE,
             font=("SF Pro Text", 10, "bold"),
@@ -585,7 +588,7 @@ class TokenMonitorApp(tk.Tk):
 
         self.sess_sub = tk.Label(
             self.sess_card,
-            text="Toplam: -",
+            text="Total: -",
             bg=BG_CARD,
             fg=FG_MUTED,
             font=("SF Mono", 10),
@@ -599,7 +602,7 @@ class TokenMonitorApp(tk.Tk):
 
         DarkButton(
             footer,
-            text="ID Gir",
+            text="Enter ID",
             command=self._prompt_conv_id,
             bg=BG_CARD,
             fg=FG,
@@ -610,7 +613,7 @@ class TokenMonitorApp(tk.Tk):
 
         DarkButton(
             footer,
-            text="Geçmiş & Tüm İstatistikler",
+            text="History & All Stats",
             command=self._open_history,
             bg=BG_HOVER,
             fg=ACCENT,
@@ -660,8 +663,8 @@ class TokenMonitorApp(tk.Tk):
         sess = self.store.get_session(self.selected_conv_id)
         current = sess.alias if sess else ""
         new_name = simpledialog.askstring(
-            "Oturum Adı",
-            f"Oturum ({self.selected_conv_id[:8]}) için ad girin:",
+            "Session Name",
+            f"Enter name for session ({self.selected_conv_id[:8]}):",
             initialvalue=current,
             parent=self,
         )
@@ -672,7 +675,7 @@ class TokenMonitorApp(tk.Tk):
     def _prompt_conv_id(self) -> None:
         cid = simpledialog.askstring(
             "Conversation ID",
-            "İzlemek istediğiniz Conversation ID'yi yapıştırın:",
+            "Paste the Conversation ID you want to monitor:",
             parent=self,
         )
         if not cid:
@@ -689,7 +692,7 @@ class TokenMonitorApp(tk.Tk):
         if sess:
             self.select_session(cid, auto_follow=False)
         else:
-            messagebox.showwarning("Bulunamadı", f"Bu ID için kayıt bulunamadı:\n{cid}", parent=self)
+            messagebox.showwarning("Not Found", f"No record found for ID:\n{cid}", parent=self)
 
     def select_session(self, conv_id: str, auto_follow: bool = False) -> None:
         self.auto_follow.set(auto_follow)
@@ -707,14 +710,21 @@ class TokenMonitorApp(tk.Tk):
         self._refresh_data()
         self.after(POLL_INTERVAL_MS, self._poll)
 
+    @staticmethod
+    def _format_session_label(s: SessionSummary, max_msg_len: int = 60) -> str:
+        msg = s.alias or s.last_prompt or s.first_prompt or "Untitled"
+        msg = " ".join(msg.split())
+        if len(msg) > max_msg_len:
+            msg = msg[: max_msg_len - 1] + "…"
+        if s.project_name:
+            return f"[{s.project_name}] {msg}"
+        return msg
+
     def _refresh_data(self) -> None:
         updated = self.store.sync_all_transcripts()
         self._sessions_cache = self.store.list_sessions()
 
-        labels = []
-        for s in self._sessions_cache:
-            name = (s.alias or s.last_prompt or s.first_prompt or "İsimsiz")[:20]
-            labels.append(f"{name} · {s.conversation_id[:8]}")
+        labels = [self._format_session_label(s) for s in self._sessions_cache]
         self.session_combo["values"] = labels
 
         if self.auto_follow.get() and self._sessions_cache:
@@ -747,7 +757,7 @@ class TokenMonitorApp(tk.Tk):
         last_turn: TurnSummary | None = sess.turns[-1] if sess.turns else None
         if last_turn:
             self.turn_title.configure(
-                text=f"SON TUR (#{last_turn.turn_index} · {last_turn.step_count} adım · {last_turn.tool_call_count} tool · {last_turn.duration_seconds:.1f}s)"
+                text=f"LAST TURN (#{last_turn.turn_index} · {last_turn.step_count} steps · {last_turn.tool_call_count} tools · {last_turn.duration_seconds:.1f}s)"
             )
             self.turn_metrics.configure(
                 text=(
@@ -757,15 +767,15 @@ class TokenMonitorApp(tk.Tk):
                 )
             )
             self.turn_sub.configure(
-                text=f"Tur Toplamı: {fmt_num(last_turn.total_tokens)} tok  ·  {fmt_time(last_turn.ended_at)}"
+                text=f"Turn Total: {fmt_num(last_turn.total_tokens)} tok  ·  {fmt_time(last_turn.ended_at)}"
             )
         else:
-            self.turn_title.configure(text="SON TUR")
-            self.turn_metrics.configure(text="Veri yok")
+            self.turn_title.configure(text="LAST TURN")
+            self.turn_metrics.configure(text="No data")
             self.turn_sub.configure(text="-")
 
         self.sess_title.configure(
-            text=f"OTURUM TOPLAMI ({sess.total_turns} tur · {sess.total_steps} adım · %{sess.cache_hit_ratio:.0f} cache)"
+            text=f"SESSION TOTAL ({sess.total_turns} turns · {sess.total_steps} steps · {sess.cache_hit_ratio:.0f}% cache)"
         )
         self.sess_metrics.configure(
             text=(
@@ -775,7 +785,7 @@ class TokenMonitorApp(tk.Tk):
             )
         )
         self.sess_sub.configure(
-            text=f"Genel Toplam: {fmt_num(sess.total_tokens)} tok  ·  Hata: {sess.total_errors}"
+            text=f"Grand Total: {fmt_num(sess.total_tokens)} tok  ·  Errors: {sess.total_errors}"
         )
 
     def destroy(self) -> None:

@@ -8,6 +8,7 @@ import json
 import os
 import re
 import sqlite3
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -18,6 +19,10 @@ DEFAULT_BRAIN_DIR = Path.home() / ".gemini" / "antigravity" / "brain"
 DEFAULT_DB_PATH = Path(__file__).resolve().parent / "data" / "history.db"
 
 _USER_REQ_RE = re.compile(r"<USER_REQUEST>\s*(.*?)\s*</USER_REQUEST>", re.DOTALL)
+_PROJECT_PATH_RE = re.compile(
+    r"(?:/Users/[^/\s\"']+|~)/Projects/([A-Za-z0-9._-]+)(/[^\s\"']*)?"
+)
+_SCRATCH_PATH_RE = re.compile(r"antigravity/scratch/([A-Za-z0-9._-]+)")
 
 
 def parse_iso_ts(ts: str | None) -> float | None:
@@ -38,6 +43,17 @@ def extract_prompt_preview(content: str | None, max_len: int = 80) -> str:
     if len(text) > max_len:
         return text[: max_len - 1] + "…"
     return text
+
+
+def _count_project_matches(text: str, counts: Counter[str], weight: int) -> None:
+    if not text:
+        return
+    for proj, subpath in _PROJECT_PATH_RE.findall(text):
+        # Every session reads global memory from Projects/brain/memory/; ignore it
+        # so it doesn't shadow the actual workspace project.
+        if proj == "brain" and subpath.startswith("/memory"):
+            continue
+        counts[proj] += weight
 
 
 @dataclass
@@ -85,6 +101,7 @@ class SessionSummary:
     conversation_id: str
     transcript_path: str
     alias: str = ""
+    project_name: str = ""
     first_prompt: str = ""
     last_prompt: str = ""
     first_seen_at: str = ""
@@ -135,6 +152,7 @@ class TokenHistoryStore:
                 conversation_id TEXT PRIMARY KEY,
                 transcript_path TEXT NOT NULL,
                 alias TEXT NOT NULL DEFAULT '',
+                project_name TEXT NOT NULL DEFAULT '',
                 first_prompt TEXT NOT NULL DEFAULT '',
                 last_prompt TEXT NOT NULL DEFAULT '',
                 first_seen_at TEXT NOT NULL DEFAULT '',
@@ -210,6 +228,11 @@ class TokenHistoryStore:
                 )
                 """
             )
+        if "project_name" not in cols:
+            cur.execute("ALTER TABLE sessions ADD COLUMN project_name TEXT NOT NULL DEFAULT ''")
+            # Force re-ingest on next sync so existing sessions populate project_name
+            # and pick up translated system turn labels.
+            cur.execute("UPDATE sessions SET file_mtime = 0, file_size = 0")
         self._conn.commit()
 
     def close(self) -> None:
@@ -252,6 +275,8 @@ class TokenHistoryStore:
         steps: list[StepRecord] = []
         turns_map: dict[int, TurnSummary] = {}
         current_turn_idx = 0
+        project_counts: Counter[str] = Counter()
+        scratch_counts: Counter[str] = Counter()
 
         try:
             with path.open("r", encoding="utf-8", errors="replace") as f:
@@ -279,8 +304,19 @@ class TokenHistoryStore:
                         str(tc.get("name", "")) for tc in tool_calls_raw if isinstance(tc, dict)
                     ]
                     thinking_chars = len(str(obj.get("thinking") or ""))
-                    content_chars = len(str(obj.get("content") or ""))
+                    content_str = str(obj.get("content") or "")
+                    content_chars = len(content_str)
                     has_error = status == "ERROR" or bool(obj.get("error"))
+
+                    if tool_calls_raw:
+                        tc_text = json.dumps(tool_calls_raw, ensure_ascii=False)
+                        _count_project_matches(tc_text, project_counts, weight=3)
+                        for m in _SCRATCH_PATH_RE.findall(tc_text):
+                            scratch_counts[m] += 3
+                    if content_str:
+                        _count_project_matches(content_str, project_counts, weight=1)
+                        for m in _SCRATCH_PATH_RE.findall(content_str):
+                            scratch_counts[m] += 1
 
                     if source == "USER_EXPLICIT" and step_type == "USER_INPUT":
                         current_turn_idx += 1
@@ -303,7 +339,7 @@ class TokenHistoryStore:
                             started_at=created_at,
                             ended_at=created_at,
                             duration_seconds=0.0,
-                            prompt_preview="(Sistem / Başlangıç)",
+                            prompt_preview="(System / Startup)",
                             model="",
                         )
 
@@ -369,19 +405,27 @@ class TokenHistoryStore:
             "SELECT alias FROM sessions WHERE conversation_id = ?", (conv_id,)
         ).fetchone()
         alias = existing["alias"] if existing else ""
+        if project_counts:
+            project_name = project_counts.most_common(1)[0][0]
+        elif scratch_counts:
+            project_name = scratch_counts.most_common(1)[0][0]
+        else:
+            project_name = ""
 
         with self._conn:
             self._conn.execute(
                 """
                 INSERT INTO sessions (
-                    conversation_id, transcript_path, alias, first_prompt, last_prompt,
+                    conversation_id, transcript_path, alias, project_name,
+                    first_prompt, last_prompt,
                     first_seen_at, last_seen_at, last_model,
                     total_turns, total_steps, total_tool_calls, total_errors,
                     total_input_tokens, total_cache_read_tokens, total_output_tokens,
                     total_tokens, file_mtime, file_size
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(conversation_id) DO UPDATE SET
                     transcript_path=excluded.transcript_path,
+                    project_name=excluded.project_name,
                     first_prompt=excluded.first_prompt,
                     last_prompt=excluded.last_prompt,
                     first_seen_at=excluded.first_seen_at,
@@ -402,6 +446,7 @@ class TokenHistoryStore:
                     conv_id,
                     str(path),
                     alias,
+                    project_name,
                     first_prompt,
                     last_prompt,
                     first_seen,
@@ -521,6 +566,7 @@ class TokenHistoryStore:
                 conversation_id=r["conversation_id"],
                 transcript_path=r["transcript_path"],
                 alias=r["alias"],
+                project_name=r["project_name"],
                 first_prompt=r["first_prompt"],
                 last_prompt=r["last_prompt"],
                 first_seen_at=r["first_seen_at"],
@@ -576,6 +622,7 @@ class TokenHistoryStore:
             conversation_id=r["conversation_id"],
             transcript_path=r["transcript_path"],
             alias=r["alias"],
+            project_name=r["project_name"],
             first_prompt=r["first_prompt"],
             last_prompt=r["last_prompt"],
             first_seen_at=r["first_seen_at"],
@@ -612,6 +659,7 @@ class TokenHistoryStore:
             """
             SELECT
                 t.conversation_id,
+                s.project_name,
                 s.alias,
                 t.turn_index,
                 t.started_at,
@@ -637,6 +685,7 @@ class TokenHistoryStore:
             writer.writerow(
                 [
                     "conversation_id",
+                    "project_name",
                     "alias",
                     "turn_index",
                     "started_at",
